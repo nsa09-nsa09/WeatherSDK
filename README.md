@@ -55,7 +55,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 public class Main {
     public static void main(String[] args) {
         // Replace with your actual OpenWeather API key.
-        String apiKey = "aa9fd131539f49b3cfade73169ec9154";
+        String apiKey = "YOUR_API_KEY";
         String city = "London";
 
         // Obtain a WeatherSDK instance via the factory (polling mode enabled).
