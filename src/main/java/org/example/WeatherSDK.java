@@ -31,7 +31,7 @@ import java.util.concurrent.*;
  */
 public class WeatherSDK {
     private static final String BASE_URL = "https://api.openweathermap.org/data/2.5/forecast";
-    private static final int CACHE_EXPIRATION = 10 * 60 * 1000; // 10 minutes in milliseconds
+    private static final int CACHE_EXPIRATION = 10 * 60 * 1000; // 10 minutes
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     private final String apiKey;
@@ -67,7 +67,7 @@ public class WeatherSDK {
         if (city == null || city.trim().isEmpty()) {
             throw new IllegalArgumentException("City must not be null or empty.");
         }
-        // Всегда запускаем задачу обновления данных для города, если она ещё не запущена.
+
         if (!pollingTasks.containsKey(city)) {
             ScheduledFuture<?> future = scheduler.scheduleAtFixedRate(() -> updateWeather(city),
                     0, 5, TimeUnit.MINUTES);
@@ -174,7 +174,6 @@ public class WeatherSDK {
         }
         ObjectNode expected = JsonNodeFactory.instance.objectNode();
 
-        // Create "weather" object using the first element of the "weather" array.
         JsonNode weatherArray = firstForecast.path("weather");
         if (weatherArray.isArray() && weatherArray.size() > 0) {
             JsonNode weather = weatherArray.get(0);
@@ -183,29 +182,23 @@ public class WeatherSDK {
             weatherObj.put("description", weather.path("description").asText());
         }
 
-        // Create "temperature" object.
         ObjectNode temperatureObj = expected.putObject("temperature");
         JsonNode mainNode = firstForecast.path("main");
         temperatureObj.put("temp", mainNode.path("temp").asDouble());
         temperatureObj.put("feels_like", mainNode.path("feels_like").asDouble());
 
-        // Add "visibility" from the forecast.
         expected.put("visibility", firstForecast.path("visibility").asInt());
 
-        // Create "wind" object.
         ObjectNode windObj = expected.putObject("wind");
         windObj.put("speed", firstForecast.path("wind").path("speed").asDouble());
 
-        // Add "datetime" (forecast time).
         expected.put("datetime", firstForecast.path("dt").asLong());
 
-        // Create "sys" object using city data (sunrise and sunset).
         JsonNode cityNode = rootNode.path("city");
         ObjectNode sysObj = expected.putObject("sys");
         sysObj.put("sunrise", cityNode.path("sunrise").asLong());
         sysObj.put("sunset", cityNode.path("sunset").asLong());
 
-        // Add "timezone" and "name" from city data.
         expected.put("timezone", cityNode.path("timezone").asInt());
         expected.put("name", cityNode.path("name").asText());
 
