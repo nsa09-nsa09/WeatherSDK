@@ -51,19 +51,28 @@ Below is an example of how to retrieve weather data for a city:
 
 ```
 import com.fasterxml.jackson.databind.JsonNode;
-import org.example.WeatherSDK;
-import org.example.WeatherSDKException;
 
-public class WeatherExample {
+public class Main {
     public static void main(String[] args) {
+        // Replace with your actual OpenWeather API key.
+        String apiKey = "aa9fd131539f49b3cfade73169ec9154";
+        String city = "London";
+
+        // Obtain a WeatherSDK instance via the factory (polling mode enabled).
+        WeatherSDK weatherSDK = WeatherSDKFactory.getInstance(apiKey);
+
         try {
-            // Replace "YOUR_API_KEY" with your actual OpenWeatherMap API key.
-            WeatherSDK sdk = new WeatherSDK("YOUR_API_KEY");
-            JsonNode weather = sdk.getWeather("London");
-            System.out.println(weather.toPrettyString());
-            sdk.shutdown();
+            // Retrieve weather data for the specified city.
+            JsonNode weatherData = weatherSDK.getWeather(city);
+            System.out.println("Weather Forecast for " + city + ":");
+            System.out.println(weatherData.toPrettyString());
         } catch (WeatherSDKException e) {
+            System.err.println("Error fetching weather data: " + e.getMessage());
             e.printStackTrace();
+        } finally {
+            // Shutdown the SDK and remove the instance.
+            weatherSDK.shutdown();
+            WeatherSDKFactory.deleteInstance(apiKey);
         }
     }
 }
