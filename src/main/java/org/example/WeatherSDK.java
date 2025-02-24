@@ -14,6 +14,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * WeatherSDK provides an interface for querying the OpenWeatherMap API.
@@ -36,8 +37,8 @@ public class WeatherSDK {
 
     private final String apiKey;
     private final ScheduledExecutorService scheduler;
-    private final Map<String, CachedWeather> cache;
-    private final Map<String, ScheduledFuture<?>> pollingTasks;
+
+    private final Map<String, AtomicReference<CachedWeather>> cache;
 
     /**
      * Constructs a WeatherSDK instance.
@@ -50,8 +51,7 @@ public class WeatherSDK {
             throw new IllegalArgumentException("API key must not be null or empty.");
         }
         this.apiKey = apiKey;
-        this.scheduler = Executors.newScheduledThreadPool(1);
-        this.pollingTasks = new ConcurrentHashMap<>();
+        this.scheduler = Executors.newScheduledThreadPool(3);
         this.cache = new ConcurrentHashMap<>();
     }
 
@@ -61,27 +61,58 @@ public class WeatherSDK {
      *
      * @param city The name of the city.
      * @return JsonNode representing the weather data.
-     * @throws WeatherSDKException If an error occurs (e.g., invalid API key or network issue).
      */
     public JsonNode getWeather(String city) throws WeatherSDKException {
         if (city == null || city.trim().isEmpty()) {
             throw new IllegalArgumentException("City must not be null or empty.");
         }
 
-        if (!pollingTasks.containsKey(city)) {
-            ScheduledFuture<?> future = scheduler.scheduleAtFixedRate(() -> updateWeather(city),
-                    0, 5, TimeUnit.MINUTES);
-            pollingTasks.put(city, future);
+        AtomicReference<CachedWeather> ref = cache.computeIfAbsent(city, key -> {
+            try {
+                JsonNode data = fetchWeather(city);
+                AtomicReference<CachedWeather> newRef = new AtomicReference<>(new CachedWeather(data));
+                // Schedule background update every 5 minutes
+                scheduler.scheduleAtFixedRate(() -> updateWeather(city),
+                        0, 5, TimeUnit.MINUTES);
+                return newRef;
+            } catch (WeatherSDKException e) {
+                throw new RuntimeException("Failed to fetch weather for " + city, e);
+            }
+        });
+
+        CachedWeather cached = ref.get();
+        if (System.currentTimeMillis() - cached.timestamp >= CACHE_EXPIRATION) {
+            updateWeather(city);
         }
-        CachedWeather cached = cache.get(city);
-        JsonNode baseWeatherData;
-        if (cached != null && System.currentTimeMillis() - cached.timestamp < CACHE_EXPIRATION) {
-            baseWeatherData = cached.data;
-        } else {
-            baseWeatherData = fetchWeather(city);
-            cache.put(city, new CachedWeather(baseWeatherData));
+        return parseAnswer(ref.get().data);
+    }
+
+    /**
+     * Fetches new weather data from the API and updates the cached data.
+     * Если обновление не удалось, возвращаются уже кэшированные данные (если они имеются).
+     *
+     * @param city The name of the city.
+     * @return JsonNode with simplified weather data.
+     */
+    private JsonNode updateWeather(String city) {
+        try {
+            JsonNode data = fetchWeather(city);
+            CachedWeather newCached = new CachedWeather(data);
+            AtomicReference<CachedWeather> ref = cache.get(city);
+            if (ref != null) {
+                ref.set(newCached);
+            } else {
+                cache.put(city, new AtomicReference<>(newCached));
+            }
+            return parseAnswer(data);
+        } catch (WeatherSDKException e) {
+            System.err.println("Failed to update weather data for " + city + ": " + e.getMessage());
+            AtomicReference<CachedWeather> ref = cache.get(city);
+            if (ref != null) {
+                return parseAnswer(ref.get().data);
+            }
+            throw new RuntimeException("No weather data available for " + city, e);
         }
-        return parseAnswer(baseWeatherData);
     }
 
     /**
@@ -93,8 +124,7 @@ public class WeatherSDK {
      */
     private JsonNode fetchWeather(String city) throws WeatherSDKException {
         try {
-            String urlString = BASE_URL;
-            urlString = addParam(urlString, "q", city);
+            String urlString = addParam(BASE_URL, "q", city);
             urlString = addParam(urlString, "appid", apiKey);
 
             URL url = new URL(urlString);
@@ -122,33 +152,17 @@ public class WeatherSDK {
      * @return The URL with the appended query parameter.
      */
     private String addParam(String url, String param, String value) {
-        String encodedValue;
         try {
-            encodedValue = URLEncoder.encode(value, StandardCharsets.UTF_8.name());
+            String encodedValue = URLEncoder.encode(value, StandardCharsets.UTF_8.name());
+            char separator = url.contains("?") ? '&' : '?';
+            return url + separator + param + "=" + encodedValue;
         } catch (UnsupportedEncodingException e) {
             throw new RuntimeException("UTF-8 encoding not supported", e);
-        }
-        char separator = url.contains("?") ? '&' : '?';
-        return url + separator + param + "=" + encodedValue;
-    }
-
-    /**
-     * Updates the cached weather data for a given city.
-     *
-     * @param city The city to update.
-     */
-    private void updateWeather(String city) {
-        try {
-            JsonNode data = fetchWeather(city);
-            cache.put(city, new CachedWeather(data));
-        } catch (WeatherSDKException e) {
-            System.err.println("Failed to update weather data for " + city + ": " + e.getMessage());
         }
     }
 
     /**
      * Parses the full API JSON response into a simplified JSON structure.
-     * This method is called every time the weather data is retrieved.
      *
      * The resulting JSON structure will be:
      * <pre>
@@ -206,12 +220,9 @@ public class WeatherSDK {
     }
 
     /**
-     * Shuts down the SDK, canceling any ongoing polling tasks.
+     * Shuts down the SDK, canceling all background update tasks.
      */
     public void shutdown() {
-        for (ScheduledFuture<?> future : pollingTasks.values()) {
-            future.cancel(true);
-        }
         scheduler.shutdown();
     }
 
