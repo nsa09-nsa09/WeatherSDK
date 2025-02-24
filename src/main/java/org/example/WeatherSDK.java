@@ -37,7 +37,6 @@ public class WeatherSDK {
 
     private final String apiKey;
     private final ScheduledExecutorService scheduler;
-
     private final Map<String, AtomicReference<CachedWeather>> cache;
 
     /**
@@ -61,6 +60,7 @@ public class WeatherSDK {
      *
      * @param city The name of the city.
      * @return JsonNode representing the weather data.
+     * @throws WeatherSDKException If an error occurs during data fetching.
      */
     public JsonNode getWeather(String city) throws WeatherSDKException {
         if (city == null || city.trim().isEmpty()) {
@@ -89,7 +89,7 @@ public class WeatherSDK {
 
     /**
      * Fetches new weather data from the API and updates the cached data.
-     * Если обновление не удалось, возвращаются уже кэшированные данные (если они имеются).
+     * If the update fails, returns the cached data (if available).
      *
      * @param city The name of the city.
      * @return JsonNode with simplified weather data.
@@ -184,7 +184,7 @@ public class WeatherSDK {
     private JsonNode parseAnswer(JsonNode rootNode) {
         JsonNode firstForecast = rootNode.path("list").get(0);
         if (firstForecast == null) {
-            throw new IllegalArgumentException("Нет данных прогноза в JSON.");
+            throw new IllegalArgumentException("No forecast data available in JSON.");
         }
         ObjectNode expected = JsonNodeFactory.instance.objectNode();
 
